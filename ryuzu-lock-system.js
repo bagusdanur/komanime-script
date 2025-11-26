@@ -1,98 +1,75 @@
+/* ================================
+   RYUZU LOCK SYSTEM - EP PRICE MODE
+   ================================ */
 
-const episodeData = [
-  {
-    episode: "7",
-    price: 200,
-    servers: [
-      {
-        sub: "480p",
-        value: "https://desustream.info/dstream/ondesu/v5/index.php?id=T20wRXo2dEZieUNweHhEK0VGRVA4SG9jYVoydzVTRFVwMlJha2FUYzdHOD0="
+window.initAnimeLock = function(options){
+
+  const { animeId, title, poster, episodes } = options;
+
+  document.querySelectorAll(".episode-btn").forEach(btn => {
+
+    const ep = btn.dataset.episode;
+    const epConfig = episodes.find(e => e.episode == ep);
+    if(!epConfig) return;
+
+    btn.addEventListener("click", async function(e){
+      e.preventDefault();
+
+      const user = firebase.auth().currentUser;
+      if(!user){
+        alert("Silakan login untuk menonton episode ini");
+        return;
       }
-    ]
-  }
-];
 
-const auth = firebase.auth();
-const db = firebase.firestore();
+      const userRef = firebase.firestore().collection("users").doc(user.uid);
+      const snap = await userRef.get();
+      const data = snap.data() || {};
 
+      const unlocked = data.unlocked || [];
+      const uniqueId = `${animeId}-ep${ep}`;
 
+      // HARGA PER EPISODE
+      const price = epConfig.price || 0;
 
-async function unlockEpisodeUnique(epId, price = 0, animeTitle = "Unknown") {
-  const user = auth.currentUser;
-  if (!user) {
-    alert("Silakan login terlebih dahulu!");
-    return false;
-  }
+      // JIKA GRATIS
+      if(price === 0){
+        window.location.href = epConfig.servers[0].value;
+        return;
+      }
 
-  const userRef = db.collection("users").doc(user.uid);
-  const snap = await userRef.get();
-  const data = snap.data() || {};
+      // SUDAH DIBELI
+      if(unlocked.includes(uniqueId)){
+        window.location.href = epConfig.servers[0].value;
+        return;
+      }
 
-  const unlocked = data.unlocked || [];
-  const coins = data.coins || 0;
+      // POPUP KONFIRMASI
+      if(!confirm(`Unlock Episode ${ep} dengan ${price} Coin?`)) return;
 
-  // Jika sudah pernah dibeli
-  if (unlocked.includes(epId)) {
-    return true;
-  }
+      if((data.coins || 0) < price){
+        alert("Coin tidak cukup!");
+        return;
+      }
 
-  // Jika episode berbayar
-  if (price > 0) {
-    if (coins < price) {
-      alert("Koin tidak mencukupi!");
-      return false;
-    }
+      // UPDATE DATABASE
+      await userRef.update({
+        coins: firebase.firestore.FieldValue.increment(-price),
+        unlocked: firebase.firestore.FieldValue.arrayUnion(uniqueId),
+        purchaseHistory: firebase.firestore.FieldValue.arrayUnion({
+          animeId: animeId,
+          title: title,
+          episode: ep,
+          price: price,
+          date: new Date().toLocaleString(),
+          thumb: poster
+        })
+      });
 
-    await userRef.update({
-      coins: firebase.firestore.FieldValue.increment(-price),
-      unlocked: firebase.firestore.FieldValue.arrayUnion(epId),
-      purchaseHistory: firebase.firestore.FieldValue.arrayUnion({
-        episodeId: epId,
-        anime: animeTitle,
-        price: price,
-        date: new Date().toISOString()
-      })
+      alert("Episode berhasil dibuka!");
+      window.location.href = epConfig.servers[0].value;
+
     });
-  } else {
-    // Jika gratis
-    await userRef.update({
-      unlocked: firebase.firestore.FieldValue.arrayUnion(epId)
-    });
-  }
 
-  return true;
-}
-
-async function loadPurchaseHistory() {
-  const user = auth.currentUser;
-  if (!user) return;
-
-  const ref = db.collection("users").doc(user.uid);
-  const snap = await ref.get();
-  const data = snap.data() || {};
-
-  const history = data.purchaseHistory || [];
-  const container = document.getElementById("purchase-history");
-  container.innerHTML = "";
-
-  if (history.length === 0) {
-    container.innerHTML = '<p>Belum ada riwayat pembelian.</p>';
-    return;
-  }
-
-  history.reverse().forEach(item => {
-    const div = document.createElement("div");
-    div.className = "history-card";
-    div.innerHTML = `
-      <div class="history-row">
-        <strong>${item.anime}</strong>
-        <span>Episode ${item.episodeId}</span>
-      </div>
-      <div class="history-row">
-        <span>${item.price} Coin</span>
-        <small>${new Date(item.date).toLocaleString()}</small>
-      </div>
-    `;
-    container.appendChild(div);
   });
-}
+
+};
